@@ -5,12 +5,9 @@
 package main
 
 import (
-	"database/sql"
 	"flag"
 	"log"
 	"net/http"
-
-	"github.com/gorilla/websocket/examples/chat/endpoints"
 )
 
 var addr = flag.String("addr", ":8081", "http service address")
@@ -32,20 +29,14 @@ func main() {
 	flag.Parse()
 
 	// db 설정
-	db, err := sql.Open("mysql", "root:dasomDASOM@tcp(db.dasom.io:3306)/dasomweb?allowNativePasswords=true&parseTime=true")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-	ep := endpoints.Endpoints{DB: db}
 
 	hub := newHub()
 	go hub.run()
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ep.serveWs(hub, w, r)
+		serveWs(hub, w, r)
 	})
-	err = http.ListenAndServe(*addr, nil)
+	err := http.ListenAndServe(*addr, nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
