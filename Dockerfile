@@ -10,4 +10,6 @@ RUN go install
 
 RUN go build -o main client.go hub.go main.go
 
-CMD ["./main"]
+EXPOSE 80
+
+ENTRYPOINT ["./main", "-port=8081"]
