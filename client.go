@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -52,6 +53,18 @@ type Client struct {
 	send chan []byte
 }
 
+type SendMsg struct {
+	Message  string  `json:"message"`
+	From     string  `json:"from"`
+	Sendtime string  `json:"sendtime"`
+	UserID   float64 `json:"user_id"`
+}
+
+type ReceiveMsg struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
 // readPump pumps messages from the websocket connection to the hub.
 //
 // The application runs readPump in a per-connection goroutine. The application
@@ -62,6 +75,11 @@ func (c *Client) readPump() {
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
+	db, err := sql.Open("mysql", "root:dasomDASOM@tcp(db.dasom.io:3306)/dasomweb")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
@@ -74,21 +92,43 @@ func (c *Client) readPump() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		c.hub.broadcast <- message
-		var msgdata map[string]interface{}
-		json.Unmarshal([]byte(message), &msgdata)
 
-		fmt.Println(msgdata["message"])
-		fmt.Println(msgdata["sendtime"])
-		db, err := sql.Open("mysql", "root:dasomDASOM@tcp(db.dasom.io:3306)/dasomweb")
-		if err != nil {
-			log.Fatal(err)
+		receive := ReceiveMsg{}
+		json.Unmarshal([]byte(message), &receive)
+
+		if receive.Type == "message" {
+			temp := receive.Data.(map[string]interface{})
+			send := SendMsg{
+				Message:  strings.Replace(temp["message"].(string), "\n", " ", -1),
+				From:     temp["from"].(string),
+				Sendtime: temp["sendtime"].(string),
+				UserID:   temp["user_id"].(float64),
+			}
+			fmt.Println(send.Message)
+			//send = receive.Data.(map[string]interface{})
+			//json.Unmarshal(map[string]receive.Data, &send)
+
+			_, err = db.Exec("INSERT chat (message, sendtime, user_id) values (?, ?, ?)", send.Message, send.Sendtime, send.UserID)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			message, _ = json.Marshal(send)
+			message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+			c.hub.broadcast <- message
+
+		} else if receive.Type == "command" {
+			rows, _ := db.Query("SELECT chat.message, users.name, chat.sendtime, chat.user_id FROM dasomweb.chat, dasomweb.users where chat.user_id = users.id order by chat.id desc limit ?, 10", receive.Data.(map[string]interface{})["idx"])
+			for rows.Next() {
+				send := SendMsg{}
+				err = rows.Scan(&send.Message, &send.From, &send.Sendtime, &send.UserID)
+				message, _ = json.Marshal(send)
+				message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+				c.hub.broadcast <- message
+				fmt.Println(message)
+			}
 		}
-		defer db.Close()
-		_, err = db.Exec("INSERT chat (id, message, sendtime) values (?, ?, ?)", msgdata["id"], msgdata["message"], msgdata["sendtime"])
-		if err != nil {
-			log.Fatal(err)
-		}
+
 	}
 }
 
@@ -146,7 +186,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 512)}
 	client.hub.register <- client
 
 	// Allow collection of memory referenced by the caller by doing all work in
