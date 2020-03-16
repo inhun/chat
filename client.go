@@ -6,9 +6,9 @@ package main
 
 import (
 	"bytes"
+	"container/list"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -95,7 +95,7 @@ func (c *Client) readPump() {
 
 		receive := ReceiveMsg{}
 		json.Unmarshal([]byte(message), &receive)
-
+		sendlist := list.New()
 		if receive.Type == "message" {
 			temp := receive.Data.(map[string]interface{})
 			send := SendMsg{
@@ -104,7 +104,6 @@ func (c *Client) readPump() {
 				Sendtime: temp["sendtime"].(string),
 				UserID:   temp["user_id"].(float64),
 			}
-			fmt.Println(send.Message)
 			//send = receive.Data.(map[string]interface{})
 			//json.Unmarshal(map[string]receive.Data, &send)
 
@@ -112,23 +111,53 @@ func (c *Client) readPump() {
 			if err != nil {
 				log.Fatal(err)
 			}
-
 			message, _ = json.Marshal(send)
 			message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+			var realsend string
+			realsend += "["
+			realsend = realsend + string(message)
+			realsend += "]"
+			message = []byte(realsend)
 			c.hub.broadcast <- message
 
 		} else if receive.Type == "command" {
 			rows, _ := db.Query("SELECT chat.message, users.name, chat.sendtime, chat.user_id FROM dasomweb.chat, dasomweb.users where chat.user_id = users.id order by chat.id desc limit ?, 10", receive.Data.(map[string]interface{})["idx"])
+			//templist := list.New()
 			for rows.Next() {
 				send := SendMsg{}
 				err = rows.Scan(&send.Message, &send.From, &send.Sendtime, &send.UserID)
-				message, _ = json.Marshal(send)
-				message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-				c.hub.broadcast <- message
-				fmt.Println(message)
+				//message, _ = json.Marshal(send)
+				//message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+				sendlist.PushFront(send)
+				//fmt.Println(send)
+				//c.hub.broadcast <- message
 			}
-		}
+			//message, _ = json.Marshal(templist)
+			//c.hub.broadcast <- message
+			//done <- true
+			var temp string
+			temp += "["
+			var e *list.Element
+			for e = sendlist.Front(); e != nil; e = e.Next() {
+				message, _ = json.Marshal(e.Value)
+				//fmt.Println(reflect.TypeOf(message))
+				if e.Next() != nil {
+					temp = temp + string(message) + ","
+				} else {
+					temp = temp + string(message)
+				}
 
+				//c.hub.broadcast <- message
+				//fmt.Println(message)
+
+			}
+			temp += "]"
+			message = []byte(temp)
+			c.hub.broadcast <- message
+			//if e == nil {
+			//	done <- true
+			//}
+		}
 	}
 }
 
