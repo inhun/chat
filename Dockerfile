@@ -31,4 +31,4 @@ RUN sh ./build.sh
 
 EXPOSE 9001
 
-ENTRYPOINT ["./main"]
+ENTRYPOINT ["./main", "-addr=:9001"]

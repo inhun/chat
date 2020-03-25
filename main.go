@@ -45,7 +45,6 @@ func main() {
 	flag.Parse()
 
 	// db 설정
-
 	hub := newHub()
 	go hub.run()
 
